@@ -3,4 +3,5 @@
 *.png
 *.h
 *.txt
+!example.png
 

@@ -59,7 +59,7 @@ fn process_image(options: &Options) {
     of.write(
         format!(
             "#include <inttypes.h>\n\n#define IMG_WIDTH {}\n#define IMG_HEIGHT {}\n\nstatic const uint8_t img[IMG_HEIGHT][IMG_WIDTH] = {{\n",
-            info.width, info.height
+            if options.compact { info.width / 8 } else { info.width }, info.height
         )
         .as_str()
         .as_bytes(),
@@ -75,20 +75,28 @@ fn process_image(options: &Options) {
                 if options.flip {
                     for i in (0..=7).rev() {
                         byte |= (if compare(buf2d[y][(x * 8) + 7 - i], &options) {
-                            print!("X");
+                            if options.print {
+                                print!("X");
+                            }
                             1
                         } else {
-                            print!(" ");
+                            if options.print {
+                                print!(" ");
+                            }
                             0
                         }) << i;
                     }
                 } else {
                     for i in 0..=7 {
                         byte |= (if compare(buf2d[y][(x * 8) + i], &options) {
-                            print!("X");
+                            if options.print {
+                                print!("X");
+                            }
                             1
                         } else {
-                            print!(" ");
+                            if options.print {
+                                print!(" ");
+                            }
                             0
                         }) << i;
                     }
