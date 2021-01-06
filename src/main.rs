@@ -1,31 +1,34 @@
 use {
-    png,
-    std::{
-        env,
-        fs::{self, File},
-        io::{Cursor, Read, Write},
-        process,
-    },
+    clap, png,
+    std::{env, fs::File, io::Write, path::PathBuf},
 };
 
-const MAX_PIXEL_VAL: u16 = 3 * 255;
+#[derive(Debug)]
+struct Options {
+    input: PathBuf,
+    output: PathBuf,
+    compact: bool,
+    flip: bool,
+    invert: bool,
+    print: bool,
+    debug: bool,
+    threshold: (u8, u8, u8),
+}
 
-fn compare(val: u16, invert: bool) -> bool {
-    if invert {
-        val > MAX_PIXEL_VAL / 2
-    } else {
-        val < MAX_PIXEL_VAL / 2
+fn compare(rgb: (u8, u8, u8), options: &Options) -> bool {
+    let mut ret =
+        rgb.0 > options.threshold.0 && rgb.1 > options.threshold.1 && rgb.2 > options.threshold.2;
+    if options.invert {
+        ret = !ret;
     }
+    ret
 }
 
-fn print_usage() {
-    println!("\nUsage:");
-    println!("{} file [invert]", env::args().nth(0).unwrap());
-}
-
-fn process_image<I: Into<String>, O: Into<String>>(path_in: I, path_out: O, invert_bits: bool) {
-    let decoder = png::Decoder::new(File::open(path_in.into()).expect("Could not open file"));
-    let (info, mut reader) = decoder.read_info().expect("Failed to read png info");
+fn process_image(options: &Options) {
+    let decoder = png::Decoder::new(File::open(&options.input).expect("Could not open file"));
+    let (info, mut reader) = decoder
+        .read_info()
+        .expect("Failed to read png info. Invalid PNG?");
 
     let mut buf = vec![0u8; info.buffer_size()];
 
@@ -35,14 +38,16 @@ fn process_image<I: Into<String>, O: Into<String>>(path_in: I, path_out: O, inve
 
     reader.next_frame(&mut buf).expect("Could not read frame");
 
-    let mut buf16 = vec![0u16; buf.len() / 3];
+    let mut buf16 = vec![(0u8, 0u8, 0u8); buf.len() / 3];
     for i in 0..(buf.len() / 3) {
-        buf16[i] = buf[(i * 3 + 0) as usize] as u16
-            + buf[(i * 3 + 1) as usize] as u16
-            + buf[(i * 3 + 2) as usize] as u16;
+        buf16[i] = (
+            buf[(i * 3 + 0) as usize],
+            buf[(i * 3 + 1) as usize],
+            buf[(i * 3 + 2) as usize],
+        );
     }
 
-    let mut buf2d = vec![vec![0u16; info.width as usize]; info.height as usize];
+    let mut buf2d = vec![vec![(0u8, 0u8, 0u8); info.width as usize]; info.height as usize];
 
     for i in 0..info.height as usize {
         for j in 0..info.width as usize {
@@ -50,10 +55,10 @@ fn process_image<I: Into<String>, O: Into<String>>(path_in: I, path_out: O, inve
         }
     }
 
-    let mut of = File::create(path_out.into()).expect("Failed to create output file");
+    let mut of = File::create(&options.output).expect("Failed to create output file");
     of.write(
         format!(
-            "#include <inttypes.h>\n\n#define IMG_WIDTH {}\n#define IMG_HEIGHT {}\n\nuint8_t img[IMG_HEIGHT][IMG_WIDTH] = {{\n",
+            "#include <inttypes.h>\n\n#define IMG_WIDTH {}\n#define IMG_HEIGHT {}\n\nstatic const uint8_t img[IMG_HEIGHT][IMG_WIDTH] = {{\n",
             info.width, info.height
         )
         .as_str()
@@ -64,33 +69,72 @@ fn process_image<I: Into<String>, O: Into<String>>(path_in: I, path_out: O, inve
     for y in 0..buf2d.len() {
         of.write("    { ".as_bytes())
             .expect("Failed to write to file");
-        for x in 0..info.width as usize {
-            print!(
-                "{}",
-                if compare(buf2d[y][x], invert_bits) {
-                    "_"
-                } else {
-                    "X"
-                }
-            );
-            of.write(
-                format!(
-                    "{}{}",
-                    if compare(buf2d[y][x], invert_bits) {
-                        1
-                    } else {
-                        0
-                    },
-                    if x + 1 == info.width as usize {
-                        ""
-                    } else {
-                        ", "
+        if options.compact {
+            for x in 0..((info.width / 8) as usize) {
+                let mut byte = 0u8;
+                if options.flip {
+                    for i in (0..=7).rev() {
+                        byte |= (if compare(buf2d[y][(x * 8) + 7 - i], &options) {
+                            print!("X");
+                            1
+                        } else {
+                            print!(" ");
+                            0
+                        }) << i;
                     }
+                } else {
+                    for i in 0..=7 {
+                        byte |= (if compare(buf2d[y][(x * 8) + i], &options) {
+                            print!("X");
+                            1
+                        } else {
+                            print!(" ");
+                            0
+                        }) << i;
+                    }
+                }
+                of.write(
+                    format!(
+                        "{:3}{}",
+                        byte,
+                        if x + 1 == (info.width / 8) as usize {
+                            ""
+                        } else {
+                            ", "
+                        }
+                    )
+                    .as_str()
+                    .as_bytes(),
                 )
-                .as_str()
-                .as_bytes(),
-            )
-            .expect("Failed to write to file");
+                .expect("Failed to write to file");
+            }
+        } else {
+            for x in 0..info.width as usize {
+                if options.print {
+                    print!(
+                        "{}",
+                        if compare(buf2d[y][x], options) {
+                            " "
+                        } else {
+                            "X"
+                        }
+                    );
+                }
+                of.write(
+                    format!(
+                        "{}{}",
+                        if compare(buf2d[y][x], options) { 1 } else { 0 },
+                        if x + 1 == info.width as usize {
+                            ""
+                        } else {
+                            ", "
+                        }
+                    )
+                    .as_str()
+                    .as_bytes(),
+                )
+                .expect("Failed to write to file");
+            }
         }
         of.write(
             format!(
@@ -105,7 +149,9 @@ fn process_image<I: Into<String>, O: Into<String>>(path_in: I, path_out: O, inve
             .as_bytes(),
         )
         .expect("Failed to write to file");
-        println!();
+        if options.print {
+            println!();
+        }
     }
 
     of.write("};\n".as_bytes())
@@ -113,9 +159,49 @@ fn process_image<I: Into<String>, O: Into<String>>(path_in: I, path_out: O, inve
 }
 
 fn main() {
-    println!("PNG to bits");
+    let yaml = clap::load_yaml!("../cli.yml");
+    let matches = clap::App::from_yaml(yaml)
+        .author(clap::crate_authors!("\n"))
+        .version(clap::crate_version!())
+        .name(clap::crate_name!())
+        .about(clap::crate_description!())
+        .get_matches();
 
-    process_image("aa.png", "bb.h", false);
+    let options = Options {
+        input: matches
+            .value_of("INPUT")
+            .map(PathBuf::from)
+            .expect("Input not set"),
+        output: matches
+            .value_of("OUTPUT")
+            .map(PathBuf::from)
+            .expect("Output not set"),
+        compact: matches.is_present("compact"),
+        flip: matches.is_present("flip-bits"),
+        invert: matches.is_present("invert"),
+        print: matches.is_present("print"),
+        debug: matches.is_present("debug"),
+        threshold: (
+            matches
+                .value_of("red")
+                .map(|r| r.parse::<u8>().expect("Failed to parse red threshold"))
+                .unwrap_or(127),
+            matches
+                .value_of("green")
+                .map(|g| g.parse::<u8>().expect("Failed to parse green threshold"))
+                .unwrap_or(127),
+            matches
+                .value_of("blue")
+                .map(|b| b.parse::<u8>().expect("Failed to parse blue threshold"))
+                .unwrap_or(127),
+        ),
+    };
 
-    // println!("{:#?}", png_img);
+    if options.debug {
+        println!("{:#?}", options);
+    }
+
+    process_image(&options);
+
+    println!("Done! Output saved to {:?}", options.output);
 }

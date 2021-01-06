@@ -1,0 +1,42 @@
+name: ""
+args:
+  - INPUT:
+      help: PNG input file.
+      required: true
+      index: 1
+  - OUTPUT:
+      help: Output file.
+      required: true
+      index: 2
+  - compact:
+      help: 8 pixels are packed into one byte.
+      short: c
+      long: compact
+  - flip-bits:
+      help: Flip bits. Does nothing unless compact is set. 0b11000000 -> 0b00000011.
+      short: f
+      long: flip-bits
+  - invert:
+      help: Invert all bits. 0xff -> 0x00.
+      short: i
+      long: invert
+  - print:
+      help: Print ascii to the terminal.
+      short: p
+      long: print
+  - debug:
+      help: Print debug info.
+      short: d
+      long: debug
+  - red:
+      help: Red threshold. Default 127.
+      long: red
+      takes_value: true
+  - green:
+      help: Green threshold. Default 127.
+      long: green
+      takes_value: true
+  - blue:
+      help: Blue threshold. Default 127.
+      long: blue
+      takes_value: true

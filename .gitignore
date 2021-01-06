@@ -1,3 +1,6 @@
 /.ccls-cache
 /target
+*.png
+*.h
+*.txt
 
